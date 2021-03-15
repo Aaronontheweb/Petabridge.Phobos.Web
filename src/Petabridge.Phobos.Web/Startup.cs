@@ -12,12 +12,8 @@ using Akka.Actor;
 using Akka.Bootstrap.Docker;
 using Akka.Configuration;
 using App.Metrics;
-using App.Metrics.Formatters.Prometheus;
-using Jaeger;
-using Jaeger.Reporters;
-using Jaeger.Samplers;
-using Jaeger.Senders;
-using Jaeger.Senders.Thrift;
+using App.Metrics.Reporting.ApplicationInsights;
+using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -25,27 +21,18 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenTracing;
+using Petabridge.Tracing.ApplicationInsights;
 using Phobos.Actor;
 using Phobos.Actor.Configuration;
+using Phobos.Tracing;
 using Phobos.Tracing.Scopes;
 
 namespace Petabridge.Phobos.Web
 {
     public class Startup
     {
-        /// <summary>
-        ///     Name of the <see cref="Environment" /> variable used to direct Phobos' Jaeger
-        ///     output.
-        ///     See https://github.com/jaegertracing/jaeger-client-csharp for details.
-        /// </summary>
-        public const string JaegerAgentHostEnvironmentVar = "JAEGER_AGENT_HOST";
-
-        public const string JaegerEndpointEnvironmentVar = "JAEGER_ENDPOINT";
-
-        public const string JaegerAgentPortEnvironmentVar = "JAEGER_AGENT_PORT";
-
-        public const int DefaultJaegerAgentPort = 6832;
-
+        public const string APP_INSIGHTS_INSTRUMENTATION_KEY = "APP_INSIGHTS_INSTRUMENTATION_KEY";
+        
         // This method gets called by the runtime. Use this method to add services to the container.
         // For more information on how to configure your application, visit https://go.microsoft.com/fwlink/?LinkID=398940
         public void ConfigureServices(IServiceCollection services)
@@ -63,11 +50,11 @@ namespace Petabridge.Phobos.Web
                 o.ConfigureGenericDiagnostics(c => { });
             });
 
-            // sets up Prometheus + ASP.NET Core metrics
+            // sets up AppInsights metrics
             ConfigureAppMetrics(services);
 
-            // sets up Jaeger tracing
-            ConfigureJaegerTracing(services);
+            // sets up tracing
+            ConfigureTracing(services);
 
             // sets up Akka.NET
             ConfigureAkka(services);
@@ -86,62 +73,23 @@ namespace Petabridge.Phobos.Web
                         o.Enabled = true;
                         o.ReportingEnabled = true;
                     })
-                    .OutputMetrics.AsPrometheusPlainText()
-                    .Build();
-
-                services.AddMetricsEndpoints(ep =>
-                {
-                    ep.MetricsTextEndpointOutputFormatter = metrics.OutputMetricsFormatters
-                        .OfType<MetricsPrometheusTextOutputFormatter>().First();
-                    ep.MetricsEndpointOutputFormatter = metrics.OutputMetricsFormatters
-                        .OfType<MetricsPrometheusTextOutputFormatter>().First();
-                });
+                    .Report.ToApplicationInsights(opts =>
+                    {
+                        opts.InstrumentationKey = Environment.GetEnvironmentVariable(APP_INSIGHTS_INSTRUMENTATION_KEY);
+                        opts.ItemsAsCustomDimensions = true;
+                        opts.DefaultCustomDimensionName = "item";
+                    }).Build();
             });
             services.AddMetricsReportingHostedService();
         }
 
-        public static void ConfigureJaegerTracing(IServiceCollection services)
+        public static void ConfigureTracing(IServiceCollection services)
         {
-            static ISender BuildSender()
-            {
-                if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(JaegerEndpointEnvironmentVar)))
-                {
-                    if (!int.TryParse(Environment.GetEnvironmentVariable(JaegerAgentPortEnvironmentVar),
-                        out var udpPort))
-                        udpPort = DefaultJaegerAgentPort;
-                    return new UdpSender(
-                        Environment.GetEnvironmentVariable(JaegerAgentHostEnvironmentVar) ?? "localhost",
-                        udpPort, 0);
-                }
-
-                return new HttpSender(Environment.GetEnvironmentVariable(JaegerEndpointEnvironmentVar));
-            }
-
-            services.AddSingleton<ITracer>(sp =>
-            {
-                var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
-
-                var builder = BuildSender();
-                var logReporter = new LoggingReporter(loggerFactory);
-
-                var remoteReporter = new RemoteReporter.Builder()
-                    .WithLoggerFactory(loggerFactory) // optional, defaults to no logging
-                    .WithMaxQueueSize(100) // optional, defaults to 100
-                    .WithFlushInterval(TimeSpan.FromSeconds(1)) // optional, defaults to TimeSpan.FromSeconds(1)
-                    .WithSender(builder) // optional, defaults to UdpSender("localhost", 6831, 0)
-                    .Build();
-
-                var sampler = new ConstSampler(true); // keep sampling disabled
-
-                // name the service after the executing assembly
-                var tracer = new Tracer.Builder(typeof(Startup).Assembly.GetName().Name)
-                    .WithReporter(new CompositeReporter(remoteReporter, logReporter))
-                    .WithSampler(sampler)
-                    .WithScopeManager(
-                        new ActorScopeManager()); // IMPORTANT: ActorScopeManager needed to properly correlate trace inside Akka.NET
-
-                return tracer.Build();
-            });
+            services.AddSingleton<ITracer>(sp => new ApplicationInsightsTracer(
+                new TelemetryConfiguration(Environment.GetEnvironmentVariable(APP_INSIGHTS_INSTRUMENTATION_KEY)),
+                new Tracing.ApplicationInsights.Endpoint(typeof(Startup).Assembly.GetName().Name, Dns.GetHostName(), 4055))
+                .WithScopeManager(new ActorScopeManager()) // need this for correct actor correlation
+            );
         }
 
         public static void ConfigureAkka(IServiceCollection services)
@@ -183,7 +131,6 @@ namespace Petabridge.Phobos.Web
 
             // enable App.Metrics routes
             app.UseMetricsAllMiddleware();
-            app.UseMetricsAllEndpoints();
 
             app.UseEndpoints(endpoints =>
             {
