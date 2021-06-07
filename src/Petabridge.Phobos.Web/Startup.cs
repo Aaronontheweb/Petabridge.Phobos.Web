@@ -51,17 +51,17 @@ namespace Petabridge.Phobos.Web
         public void ConfigureServices(IServiceCollection services)
         {
             // enables OpenTracing for ASP.NET Core
-            services.AddOpenTracing(o =>
-            {
-                o.ConfigureAspNetCore(a =>
-                {
-                    a.Hosting.OperationNameResolver = context => $"{context.Request.Method} {context.Request.Path}";
+            //services.AddOpenTracing(o =>
+            //{
+            //    o.ConfigureAspNetCore(a =>
+            //    {
+            //        a.Hosting.OperationNameResolver = context => $"{context.Request.Method} {context.Request.Path}";
 
-                    // skip Prometheus HTTP /metrics collection from appearing in our tracing system
-                    a.Hosting.IgnorePatterns.Add(x => x.Request.Path.StartsWithSegments(new PathString("/metrics")));
-                });
-                o.ConfigureGenericDiagnostics(c => { });
-            });
+            //        // skip Prometheus HTTP /metrics collection from appearing in our tracing system
+            //        a.Hosting.IgnorePatterns.Add(x => x.Request.Path.StartsWithSegments(new PathString("/metrics")));
+            //    });
+            //    o.ConfigureGenericDiagnostics(c => { });
+            //});
 
             // sets up Prometheus + ASP.NET Core metrics
             ConfigureAppMetrics(services);

@@ -4,7 +4,10 @@
 // </copyright>
 // -----------------------------------------------------------------------
 
+
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
 namespace Petabridge.Phobos.Web
@@ -18,9 +21,11 @@ namespace Petabridge.Phobos.Web
 
         public static IHostBuilder CreateHostBuilder(string[] args)
         {
-            return Host.CreateDefaultBuilder(args)
-                .ConfigureSerilogLogging()
-                .ConfigureWebHostDefaults(webBuilder => { webBuilder.UseStartup<Startup>(); });
+            var host = new WebHostBuilder()
+
+            //return Host.CreateDefaultBuilder(args)
+            //    .ConfigureSerilogLogging();
+            //.ConfigureWebHostDefaults(webBuilder => { webBuilder.UseStartup<Startup>(); });
         }
     }
 }
