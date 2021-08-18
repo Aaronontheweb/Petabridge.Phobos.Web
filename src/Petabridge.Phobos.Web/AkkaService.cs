@@ -8,6 +8,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Akka.Actor;
+using Akka.Cluster.Sharding;
 using Akka.Event;
 using Akka.Routing;
 using Akka.Util;
@@ -21,6 +22,72 @@ using SerilogLogMessageFormatter = Akka.Logger.Serilog.SerilogLogMessageFormatte
 
 namespace Petabridge.Phobos.Web
 {
+    /// <summary>
+    /// Actor that just logs what it receives
+    /// </summary> 
+    public class EntityActor : ReceiveActor
+    {
+        private int _count = 0;
+        private readonly string _entityId;
+        private readonly ILoggingAdapter _log = Context.GetLogger();
+
+        public EntityActor(string entityId)
+        {
+            _entityId = entityId;
+            
+            ReceiveAny(o =>
+            {
+                _log.Info("Received [{0}] - {1} messages received so far", o, ++_count);
+                Sender.Tell(o);
+            });
+        }
+    }
+
+    public interface IWithEntityId
+    {
+        string EntityId { get; }
+    }
+
+    public sealed class EntityCmd : IWithEntityId
+    {
+        public EntityCmd(string entityId, string msg)
+        {
+            EntityId = entityId;
+            Msg = msg;
+        }
+
+        public string EntityId { get; }
+        
+        public string Msg { get; }
+
+        public override string ToString()
+        {
+            return $"{GetType()}(EntityId={EntityId})";
+        }
+    }
+
+    public sealed class EntityRouter : HashCodeMessageExtractor
+    {
+        public EntityRouter(int maxNumberOfShards) : base(maxNumberOfShards)
+        {
+        }
+
+        public override string EntityId(object message)
+        {
+            switch (message)
+            {
+                case IWithEntityId e:
+                    return e.EntityId;
+                case ShardRegion.StartEntity s:
+                {
+                    return s.EntityId;
+                }
+                default:
+                    return null;
+            }
+        }
+    }
+    
     public sealed class ChildActor : ReceiveActor
     {
         private readonly ILoggingAdapter _log = Context.GetLogger();
@@ -102,7 +169,11 @@ namespace Petabridge.Phobos.Web
             Sys = sys;
             ConsoleActor = sys.ActorOf(Props.Create(() => new ConsoleActor()), "console");
             RouterActor = sys.ActorOf(Props.Empty.WithRouter(FromConfig.Instance), "echo");
-            RouterForwarderActor = sys.ActorOf(Props.Create(() => new RouterForwarderActor(RouterActor)), "fwd");
+            var sharding = ClusterSharding.Get(sys);
+            RouterForwarderActor = sharding.Start("entity", s => Props.Create<EntityActor>(s),
+                ClusterShardingSettings.Create(sys),
+                new EntityRouter(100));
+            //RouterForwarderActor = sys.ActorOf(Props.Create(() => new RouterForwarderActor(RouterActor)), "fwd");
         }
 
         internal ActorSystem Sys { get; }

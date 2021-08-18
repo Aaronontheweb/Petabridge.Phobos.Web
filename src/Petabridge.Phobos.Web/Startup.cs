@@ -158,7 +158,9 @@ namespace Petabridge.Phobos.Web
                 var phobosSetup = PhobosSetup.Create(new PhobosConfigBuilder()
                         .WithMetrics(m =>
                             m.SetMetricsRoot(metrics)) // binds Phobos to same IMetricsRoot as ASP.NET Core
-                        .WithTracing(t => t.SetTracer(tracer))) // binds Phobos to same tracer as ASP.NET Core
+                        .WithTracing(t => t.SetTracer(tracer)
+                            .IncludeMessagesAlreadyInTrace(true)
+                            .AddIncludeMessageFilter<IWithEntityId>())) // binds Phobos to same tracer as ASP.NET Core
                     .WithSetup(BootstrapSetup.Create()
                         .WithConfig(config) // passes in the HOCON for Akka.NET to the ActorSystem
                         .WithActorRefProvider(PhobosProviderSelection
@@ -189,14 +191,15 @@ namespace Petabridge.Phobos.Web
             {
                 var actors = endpoints.ServiceProvider.GetService<AkkaActors>();
                 var tracer = endpoints.ServiceProvider.GetService<ITracer>();
-                endpoints.MapGet("/", async context =>
+                endpoints.MapGet("/{id:alpha}", async context =>
                 {
+                    var entityId = (string)context.Request.RouteValues["id"];
                     using (var s = tracer.BuildSpan("Cluster.Ask").StartActive())
                     {
                         // router actor will deliver message randomly to someone in cluster
-                        var resp = await actors.RouterForwarderActor.Ask<string>($"hit from {context.TraceIdentifier}",
+                        var resp = await actors.RouterForwarderActor.Ask<EntityCmd>(new EntityCmd(entityId,$"hit from {context.TraceIdentifier}"),
                             TimeSpan.FromSeconds(5));
-                        await context.Response.WriteAsync(resp);
+                        await context.Response.WriteAsync(resp.Msg);
                     }
                 });
             });
