@@ -28,8 +28,8 @@ var grafana = builder.AddContainer("grafana", "grafana/grafana")
     .WithLifetime(ContainerLifetime.Session); // Force fresh container each run
 
 builder.AddOpenTelemetryCollector("otelcollector", "./otel_collector/config.yaml")
-    .WithEnvironment("SEQ_ENDPOINT", $"{prometheus.GetEndpoint("http")}/ingest/otlp")
-    .WithEnvironment("PROMETHEUS_ENDPOINT", $"{prometheus.GetEndpoint("http")}/api/v1/otlp");
+    .WithEnvironment("SEQ_ENDPOINT", $"{seq.GetEndpoint("http")}/ingest/otlp")
+    .WithEnvironment("PROMETHEUS_ENDPOINT", $"{prometheus.GetEndpoint("http")}/api/v1/otlp/v1/metrics");
 
 #endregion
 
